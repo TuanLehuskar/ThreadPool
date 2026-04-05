@@ -145,3 +145,54 @@ TEST(ThreadPoolTest, HardwareConcurrencyConstructor)
     auto future = pool.enqueue([] { return 42; });
     EXPECT_EQ(future.get(), 42);
 }
+
+// wait() blocks until all tasks complete
+TEST(ThreadPoolTest, WaitBlocksUntilDone)
+{
+    ThreadPool pool(4);
+    std::atomic<int> counter{0};
+
+    for (int i = 0; i < 20; ++i) {
+        pool.enqueue([&counter] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            counter.fetch_add(1, std::memory_order_relaxed);
+        });
+    }
+
+    pool.wait();
+    EXPECT_EQ(counter.load(), 20);
+}
+
+// thread_count() returns the correct number of threads
+TEST(ThreadPoolTest, ThreadCount)
+{
+    ThreadPool pool(4);
+    EXPECT_EQ(pool.thread_count(), 4u);
+}
+
+// queue_size() reflects pending task count
+TEST(ThreadPoolTest, QueueSize)
+{
+    // Use 1 thread and a blocking task to keep the queue backed up
+    ThreadPool pool(1);
+
+    std::mutex block_mutex;
+    std::unique_lock<std::mutex> block_lock(block_mutex);
+
+    // First task blocks the single worker until we release block_lock
+    pool.enqueue([&block_mutex] {
+        std::unique_lock<std::mutex> lock(block_mutex);
+    });
+
+    // Enqueue 3 more tasks while the worker is blocked
+    for (int i = 0; i < 3; ++i) {
+        pool.enqueue([] {});
+    }
+
+    EXPECT_EQ(pool.queue_size(), 3u);
+
+    // Unblock the worker
+    block_lock.unlock();
+    pool.wait();
+    EXPECT_EQ(pool.queue_size(), 0u);
+}

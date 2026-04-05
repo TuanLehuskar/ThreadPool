@@ -30,6 +30,25 @@ ThreadPool::~ThreadPool()
     }
 }
 
+void ThreadPool::wait()
+{
+    std::unique_lock<std::mutex> lock(queue_mutex);
+    done_cv.wait(lock, [this] {
+        return tasks.empty() && active_tasks == 0;
+    });
+}
+
+size_t ThreadPool::thread_count() const noexcept
+{
+    return workers.size();
+}
+
+size_t ThreadPool::queue_size() const
+{
+    std::unique_lock<std::mutex> lock(queue_mutex);
+    return tasks.size();
+}
+
 void ThreadPool::workerLoop()
 {
     while (true) {
@@ -48,8 +67,12 @@ void ThreadPool::workerLoop()
 
             task = std::move(tasks.front());
             tasks.pop();
+            ++active_tasks;
         }
 
         task();
+
+        --active_tasks;
+        done_cv.notify_all();
     }
 }

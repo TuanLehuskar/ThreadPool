@@ -23,11 +23,19 @@ gTest is fetched automatically at configure time.
 ```cpp
 ThreadPool pool(4);
 
+// Submit a task, get a future for the result
 std::future<int> result = pool.enqueue([](int a, int b) {
     return a + b;
 }, 3, 4);
 
 int value = result.get();
+
+// Block until all queued tasks finish
+pool.wait();
+
+// Introspection
+size_t threads = pool.thread_count(); // number of worker threads
+size_t pending = pool.queue_size();   // number of tasks waiting in queue
 ```
 
 `enqueue` accepts any callable and forwards its arguments. The return value is
@@ -48,10 +56,12 @@ Each worker blocks on `cv.wait` with the predicate `stopRunning || !tasks.empty(
 The predicate guards against spurious wakeups — a thread that wakes up without
 either condition being true goes back to sleep immediately.
 
-Once woken with a task available, the worker moves the task out of the queue
-and releases the lock before calling it. Releasing the lock before execution is
-important: holding it during `task()` would serialize all workers and defeat the
-purpose of the pool.
+Once woken with a task available, the worker moves the task out of the queue,
+increments `active_tasks`, then releases the lock before calling `task()`.
+Releasing the lock before execution is important: holding it during `task()`
+would serialize all workers and defeat the purpose of the pool. After the task
+returns, the worker decrements `active_tasks` and notifies `done_cv` so that
+any caller blocked in `wait()` can re-check the idle condition.
 
 ### Destructor
 
@@ -64,6 +74,19 @@ threads.
 The lock scope around `stopRunning = true` is intentional — without it, a worker
 could read `stopRunning` between the assignment and `notify_all`, miss the
 notification, and sleep forever.
+
+### wait
+
+Blocks the calling thread until `tasks.empty() && active_tasks == 0`. Uses a
+separate `done_cv` rather than the main `cv` to avoid interfering with workers
+waiting for new tasks. Safe to call at any time, including when the queue is
+already empty.
+
+### thread_count / queue_size
+
+`thread_count()` returns `workers.size()` with no locking needed — the vector
+is write-once after construction. `queue_size()` locks `queue_mutex` (declared
+`mutable`) so it can be called on a `const` pool reference.
 
 ### enqueue
 

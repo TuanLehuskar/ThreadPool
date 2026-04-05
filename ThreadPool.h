@@ -22,14 +22,21 @@ public:
     auto enqueue(F&& f, Args&&... args)
         -> std::future<std::invoke_result_t<F, Args...>>;
 
+    void wait();
+
+    size_t thread_count() const noexcept;
+    size_t queue_size() const;
+
 private:
     void workerLoop();
 
-    std::vector<std::thread> workers;
+    std::vector<std::thread>          workers;
     std::queue<std::function<void()>> tasks;
-    std::mutex queue_mutex;
-    std::condition_variable cv;
-    bool stopRunning;
+    mutable std::mutex                queue_mutex;
+    std::condition_variable           cv;
+    std::condition_variable           done_cv;
+    std::atomic<size_t>               active_tasks{0};
+    bool                              stopRunning;
 };
 
 template <typename F, typename... Args>
