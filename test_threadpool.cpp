@@ -173,25 +173,35 @@ TEST(ThreadPoolTest, ThreadCount)
 // queue_size() reflects pending task count
 TEST(ThreadPoolTest, QueueSize)
 {
-    // Use 1 thread and a blocking task to keep the queue backed up
     ThreadPool pool(1);
 
     std::mutex block_mutex;
+    std::condition_variable started_cv;
+    bool started = false;
+
     std::unique_lock<std::mutex> block_lock(block_mutex);
 
-    // First task blocks the single worker until we release block_lock
-    pool.enqueue([&block_mutex] {
+    // First task signals that it has started, then blocks
+    pool.enqueue([&] {
+        {
+            std::unique_lock<std::mutex> lock(block_mutex);
+            started = true;
+            started_cv.notify_one();
+        }
+        // Wait until the test releases block_lock
         std::unique_lock<std::mutex> lock(block_mutex);
     });
 
-    // Enqueue 3 more tasks while the worker is blocked
+    // Wait until the worker has actually picked up and started the first task
+    started_cv.wait(block_lock, [&] { return started; });
+
+    // Now the queue is empty — enqueue 3 more while worker is blocked
     for (int i = 0; i < 3; ++i) {
         pool.enqueue([] {});
     }
 
     EXPECT_EQ(pool.queue_size(), 3u);
 
-    // Unblock the worker
     block_lock.unlock();
     pool.wait();
     EXPECT_EQ(pool.queue_size(), 0u);

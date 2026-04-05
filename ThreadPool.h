@@ -45,7 +45,7 @@ auto ThreadPool::enqueue(F&& f, Args&&... args)
 {
     using return_type = std::invoke_result_t<F, Args...>;
 
-    std::tuple<std::decay_t<Args>...> args_tuple = std::make_tuple(std::forward<Args>(args)...);
+    auto args_tuple = std::make_tuple(std::forward<Args>(args)...);
 
     auto wrapper_lambda = [
         func       = std::forward<F>(f),
@@ -54,7 +54,7 @@ auto ThreadPool::enqueue(F&& f, Args&&... args)
         return std::apply(std::move(func), std::move(args_tuple));
     };
 
-    std::shared_ptr<std::packaged_task<return_type()>> task_ptr =
+    auto task_ptr =
         std::make_shared<std::packaged_task<return_type()>>(std::move(wrapper_lambda));
 
     std::future<return_type> result_future = task_ptr->get_future();
